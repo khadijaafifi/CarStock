@@ -10,120 +10,126 @@ use Illuminate\Support\Facades\Log;
 use App\Models\ChatHistory;
 use App\Notifications\WelcomeEmail;
 use Illuminate\Support\Facades\Notification;
+use App\Services\OpelScraperService;
 
 class SearchController extends Controller
 {
     protected $openAI;
     protected $chatHistory;
+    protected $opelScraper;
 
-    public function __construct(OpenAIService $openAI, ChatHistoryService $chatHistory)
+    public function __construct(OpenAIService $openAI, ChatHistoryService $chatHistory, OpelScraperService $opelScraper)
     {
         $this->openAI = $openAI;
         $this->chatHistory = $chatHistory;
+        $this->opelScraper = $opelScraper;
     }
 
     public function getAiResponse(Request $request)
-{
-    $request->validate([
-        'message' => 'required|string'
-    ]);
+    {
+        $request->validate([
+            'message' => 'required|string'
+        ]);
 
-    $userQuestion = $request->input('message');
-    $sessionId = $request->session()->getId();
+        $userQuestion = $request->input('message');
+        $sessionId = $request->session()->getId();
 
-    Log::info('New chat request', [
-        'session_id' => $sessionId,
-        'question' => $userQuestion
-    ]);
-
-    try {
-        // Contexte voitures
-        $cars = Car::all();
-        $carContext = "Voitures en stock:\n" . $cars->map(fn($car) =>
-            "- {$car->marque} {$car->modele}, {$car->couleur}, {$car->prix} MAD"
-        )->implode("\n");
-
-        // Historique + nouveau message
-        $history = $this->chatHistory->getBySession($sessionId);
-        $historyWithContext = array_merge([[
-            'role' => 'system',
-            'content' => "$carContext\n\nTu es un assistant commercial spécialisé dans les voitures dans notre base de données. Réponds de façon professionnelle et amicale dans la langue de l'utilisateur. Termine la conversation par une demande de contact (nom, email, téléphone)."
-        ]], $history, [[
-            'role' => 'user',
-            'content' => $userQuestion
-        ]]);
-
-        Log::debug('Sending request to OpenAI', [
+        Log::info('New chat request', [
             'session_id' => $sessionId,
-            'message_count' => count($historyWithContext)
+            'question' => $userQuestion
         ]);
-
-        // Réponse de l'assistant
-        $response = $this->openAI->askQuestion($historyWithContext);
-
-        Log::debug('Received response from OpenAI', [
-            'session_id' => $sessionId,
-            'response_length' => strlen($response)
-        ]);
-
-        // 1. Sauvegarde sans meta_data
-        $this->chatHistory->save(
-            $sessionId,
-            $userQuestion,
-            $response,
-            []
-        );
-
-        // 2. Extraire infos personnelles après avoir tout sauvegardé
-        $metaData = $this->AiextractData($request);
-
-        // 3. Mettre à jour le dernier message avec les meta_data
-        $lastMessage = ChatHistory::where('session_id', $sessionId)
-            ->latest()
-            ->first();
-
-        if ($lastMessage) {
-            $lastMessage->update(['meta_data' => $metaData]);
-        }
-
-        return response()->json([
-            'response' => $response,
-            'status' => 'success',
-            'session_id' => $sessionId
-        ]);
-
-    } catch (\Exception $e) {
-        Log::error('Error in getAiResponse', [
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString(),
-            'session_id' => $sessionId
-        ]);
-
-        $errorResponse = 'Désolé, une erreur est survenue. Veuillez réessayer plus tard.';
 
         try {
+             //Contexte voitures
+            $opelModels = $this->opelScraper->getModels();
+            $cars = Car::all();
+            $localCarsText = "Voitures en stock (base de données):\n" . $cars->map(fn($car) =>
+                "- {$car->marque} {$car->modele}, {$car->couleur}, {$car->prix} MAD"
+            )->implode("\n");
+
+            $opelModelsText = "Modèles Opel (site officiel) :\n" . implode("\n", array_map(fn($model) => "- $model", $opelModels));
+            $carContext = "$localCarsText\n\n$opelModelsText";
+
+            // Historique + nouveau message
+            $history = $this->chatHistory->getBySession($sessionId);
+            $historyWithContext = array_merge([[
+                'role' => 'system',
+                'content' => "$carContext\n\nTu es un assistant commercial spécialisé dans les voitures de marque Opel. Réponds de façon professionnelle et amicale dans la langue de l'utilisateur. Termine la conversation par une demande de contact (nom, email, téléphone)."
+            ]], $history, [[
+                'role' => 'user',
+                'content' => $userQuestion
+            ]]);
+
+            Log::debug('Sending request to OpenAI', [
+                'session_id' => $sessionId,
+                'message_count' => count($historyWithContext)
+            ]);
+
+            // Réponse de l'assistant
+            $response = $this->openAI->askQuestion($historyWithContext);
+
+            Log::debug('Received response from OpenAI', [
+                'session_id' => $sessionId,
+                'response_length' => strlen($response)
+            ]);
+
+            // Sauvegarde sans meta_data
             $this->chatHistory->save(
                 $sessionId,
                 $userQuestion,
-                $errorResponse,
-                ['error' => $e->getMessage()]
+                $response,
+                []
             );
-        } catch (\Exception $historyException) {
-            Log::critical('Failed to save error to chat history', [
-                'original_error' => $e->getMessage(),
-                'history_error' => $historyException->getMessage()
+
+            // Extraire infos personnelles après avoir tout sauvegardé
+            $metaData = $this->AiextractData($request);
+
+            // Mettre à jour le dernier message avec les meta_data
+            $lastMessage = ChatHistory::where('session_id', $sessionId)
+                ->latest()
+                ->first();
+
+            if ($lastMessage) {
+                $lastMessage->update(['meta_data' => $metaData]);
+            }
+
+            return response()->json([
+                'response' => $response,
+                'status' => 'success',
+                'session_id' => $sessionId
             ]);
-            $this->saveToFileFallback($sessionId, $userQuestion, $errorResponse);
+
+        } catch (\Exception $e) {
+            Log::error('Error in getAiResponse', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'session_id' => $sessionId
+            ]);
+
+            $errorResponse = 'Désolé, une erreur est survenue. Veuillez réessayer plus tard.';
+
+            try {
+                $this->chatHistory->save(
+                    $sessionId,
+                    $userQuestion,
+                    $errorResponse,
+                    ['error' => $e->getMessage()]
+                );
+            } catch (\Exception $historyException) {
+                Log::critical('Failed to save error to chat history', [
+                    'original_error' => $e->getMessage(),
+                    'history_error' => $historyException->getMessage()
+                ]);
+                $this->saveToFileFallback($sessionId, $userQuestion, $errorResponse);
+            }
+
+            return response()->json([
+                'response' => $errorResponse,
+                'status' => 'error',
+                'session_id' => $sessionId
+            ]);
         }
-
-        return response()->json([
-            'response' => $errorResponse,
-            'status' => 'error',
-            'session_id' => $sessionId
-        ]);
     }
-}
-
 
     public function getChatHistory(Request $request)
     {
@@ -184,60 +190,54 @@ class SearchController extends Controller
     }
 
     private function AiextractData($request)
-{
-    $sessionId = $request->session()->getId();
+    {
+        $sessionId = $request->session()->getId();
 
-    // Récupère tous les messages liés à la session actuelle, dans l'ordre de création
-    $messages = ChatHistory::where('session_id', $sessionId)
-                           ->orderBy('created_at')
-                           ->get();
+        $messages = ChatHistory::where('session_id', $sessionId)
+                               ->orderBy('created_at')
+                               ->get();
 
-    // Construit la conversation complète
-    $conversation = '';
-    foreach ($messages as $msg) {
-        $conversation .= "Utilisateur : {$msg->lead_message}\n";
-        $conversation .= "Assistant : {$msg->assistant_response}\n";
+        $conversation = '';
+        foreach ($messages as $msg) {
+            $conversation .= "Utilisateur : {$msg->lead_message}\n";
+            $conversation .= "Assistant : {$msg->assistant_response}\n";
+        }
+
+        $prompt = "Voici la conversation complète entre un utilisateur et un assistant :\n\n$conversation\n\n" .
+                  "Ta tâche est d'analyser cette discussion pour extraire les informations suivantes, uniquement si elles apparaissent clairement :\n" .
+                  "- nom de l'utilisateur\n" .
+                  "- adresse email\n" .
+                  "- numéro de téléphone\n" .
+                  "- un résumé clair de la discussion a la fin de discussion non pas a chaque message.\n\n" .
+                  "IMPORTANT :\n" .
+                  "- Si une information n'est pas présente, laisse le champ vide\n" .
+                  "- Ne complète pas ou n'invente pas\n" .
+                  "- Réponds uniquement au format JSON SANS ajout ni commentaire\n\n" .
+                  "{\"nom\": \"\", \"email\": \"\", \"numero\": \"\", \"recap_discussion\": \"\"}";
+
+        $response = $this->openAI->askQuestion([
+            [
+                'role' => 'system',
+                'content' => "Tu es un assistant chargé d'extraire des données personnelles et de résumer chaque discussion à partir de texte. Réponds uniquement en JSON."
+            ],
+            [
+                'role' => 'user',
+                'content' => $prompt
+            ]
+        ]);
+
+        Log::debug('Réponse brute IA extraction', ['response' => $response]);
+
+        $data = json_decode($response, true);
+
+        return [
+            'nom' => $data['nom'] ?? '',
+            'email' => $data['email'] ?? '',
+            'numero' => $data['numero'] ?? '',
+            'recap_discussion' => $data['recap_discussion'] ?? ''
+        ];
     }
 
-    // Prompt structuré et clair
-    $prompt = "Voici la conversation complète entre un utilisateur et un assistant :\n\n$conversation\n\n" .
-              "Ta tâche est d'analyser cette discussion pour extraire les informations suivantes, uniquement si elles apparaissent clairement :\n" .
-              "- nom de l'utilisateur\n" .
-              "- adresse email\n" .
-              "- numéro de téléphone\n" .
-              "- un résumé clair de la discussion a la fin de discussion non pas a chaque message.\n\n" .
-              "IMPORTANT :\n" .
-              "- Si une information n'est pas présente, laisse le champ vide\n" .
-              "- Ne complète pas ou n'invente pas\n" .
-              "- Réponds uniquement au format JSON SANS ajout ni commentaire\n\n" .
-              "{\"nom\": \"\", \"email\": \"\", \"numero\": \"\", \"recap_discussion\": \"\"}";
-
-    // Appel à l'API OpenAI
-    $response = $this->openAI->askQuestion([
-        [
-            'role' => 'system',
-            'content' => "Tu es un assistant chargé d'extraire des données personnelles et de résumer chaque discussion à partir de texte. Réponds uniquement en JSON."
-        ],
-        [
-            'role' => 'user',
-            'content' => $prompt
-        ]
-    ]);
-
-    Log::debug('Réponse brute IA extraction', ['response' => $response]);
-
-    // Analyse JSON
-    $data = json_decode($response, true);
-
-    return [
-        'nom' => $data['nom'] ?? '',
-        'email' => $data['email'] ?? '',
-        'numero' => $data['numero'] ?? '',
-        'recap_discussion' => $data['recap_discussion'] ?? ''
-    ];
-}
-
-    
     public function envoyerEmails()
     {
         $histories = ChatHistory::whereNotNull('meta_data')->get();
@@ -255,18 +255,16 @@ class SearchController extends Controller
 
         return response()->json(['status' => 'Emails envoyés avec succès']);
     }
+
     public function resetSession(Request $request)
-{
-    // Invalide l'ancienne session
-    $request->session()->invalidate();
+    {
+        $request->session()->invalidate();
+        $request->session()->regenerate();
 
-    // Regénère une nouvelle session ID
-    $request->session()->regenerate();
-
-    return response()->json([
-        'status' => 'new_session_started',
-        'session_id' => $request->session()->getId(),
-        'message' => 'Nouvelle session démarrée avec succès.'
-    ]);
-}
+        return response()->json([
+            'status' => 'new_session_started',
+            'session_id' => $request->session()->getId(),
+            'message' => 'Nouvelle session démarrée avec succès.'
+        ]);
+    }
 }

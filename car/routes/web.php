@@ -35,6 +35,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
     Route::get('/leads', [LeadController::class, 'index'])->name('leads.index');
     Route::delete('/leads/{id}', [LeadController::class, 'destroy'])->name('leads.destroy');
+    Route::get('/leads/pdf', [LeadController::class, 'exportPdf'])->name('leads.export.pdf');
 
 });
 Route::match(['get', 'post'], '/get-ai-response', [SearchController::class, 'getAiResponse']);
