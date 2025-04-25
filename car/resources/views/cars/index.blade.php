@@ -3,15 +3,18 @@
 @section('content')
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="h4 font-weight-bold">Liste des véhicules</h2>
+        <h2 class="h2 font-weight-bold text-primary ">Liste des véhicules</h2>
         @if(Auth::check() && str_ends_with(Auth::user()->email, '@admin.com'))
         <div>
-        <a href="{{ route('dashboard') }}" class="btn btn-outline-primary btn-sm">
-            <i class="fas fa-tasks mr-1"></i> Gérer le stock
-        </a>
-        <a href="{{ route('leads.index') }}" class="btn btn-outline-primary btn-sm">
-            <i class="fas fa-address-book mr-2"></i> Voir les leads
-        </a>
+            <a href="{{ route('dashboard') }}" class="btn btn-outline-primary btn-sm">
+                <i class="fas fa-tasks mr-1"></i> Gérer le stock
+            </a>
+            <a href="{{ route('leads.index') }}" class="btn btn-outline-primary btn-sm">
+                <i class="fas fa-address-book mr-2"></i> Voir les leads
+            </a>
+            <a href="{{ route('sites.index') }}" class="btn btn-outline-primary btn-sm">
+                <i class="fas fa-globe mr-2"></i> Ajouter un site
+            </a>
         </div>
         @endif
     </div>
@@ -47,6 +50,18 @@
                     <h5 class="card-title font-weight-bold mb-1 text-truncate">
                         {{ $car->marque }} - {{ $car->modele }}
                     </h5>
+
+                    <!-- Note moyenne -->
+                    @php
+                        $car->updateRating(); // Assurez-vous que la note est mise à jour
+                        $rating = $car->rating;
+                    @endphp
+                    <div class="mb-2">
+                        @for($i = 1; $i <= 5; $i++)
+                            <i class="fas fa-star {{ $i <= $rating ? 'text-warning' : 'text-muted' }}"></i>
+                        @endfor
+                        <span class="small text-muted ml-1">({{ $car->reviews()->count() }} avis)</span>
+                    </div>
                     
                     <!-- Couleur et année -->
                     <div class="d-flex align-items-center mb-2">
@@ -78,7 +93,6 @@
 </div>
 
 <style>
-    /* Styles complémentaires */
     .object-fit-cover {
         object-fit: cover;
     }
@@ -96,4 +110,28 @@
         box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
     }
 </style>
+   <!-- // script pour verifier la note a chaque refresh de la page-->
+   <script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const carId = {{ $car->id }}; // Assurez-vous que $car existe dans la vue
+
+        // Utilisation de la route dynamique avec Laravel
+        fetch(`/cars/${carId}/reviews`, {
+            method: 'GET',
+            credentials: 'same-origin', // pour envoyer le cookie de session
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log("Note vérifiée :", data);
+        })
+        .catch(error => {
+            console.error("Erreur lors de la vérification de la note :", error);
+        });
+    });
+</script>
+
+
 @endsection

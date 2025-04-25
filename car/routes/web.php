@@ -4,7 +4,9 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\CarController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\LeadController;
+use App\Http\Controllers\ReviewController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\SiteController;
 use Illuminate\Support\Facades\log;
 use Illuminate\Support\Facades\Mail;
 
@@ -38,23 +40,37 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/leads/pdf', [LeadController::class, 'exportPdf'])->name('leads.export.pdf');
 
 });
-Route::match(['get', 'post'], '/get-ai-response', [SearchController::class, 'getAiResponse']);
+Route::match(['get', 'post'], '/get-ai-response', [SearchController::class, 'getAiResponse'])->middleware('web');
+//  Route::get('/check-rating/{carId}', [ReviewController::class, 'checkAndProcessRating']);
+Route::prefix('cars')->group(function () {
+    // Afficher les avis pour un véhicule
+    Route::get('{carId}/reviews', [ReviewController::class, 'show']);
 
-Route::get('/test-email', function () {
-    try {
-        Mail::raw('Ceci est un test d’email Laravel.', function ($message) {
-            $message->to('kenzaaddi05@gmail.com') // ➜ mets ici ton adresse pour tester
-                    ->subject('Test Email Laravel');
-        });
-
-        return 'Email envoyé avec succès !';
-    } catch (\Exception $e) {
-        Log::error('Erreur envoi email : ' . $e->getMessage());
-        return 'Échec envoi email.';
-    }
+    // Créer un nouvel avis pour un véhicule
+    Route::post('{carId}/reviews', [ReviewController::class, 'create']);
 });
-Route::get('/envoyer-mails', [SearchController::class, 'envoyerEmails']);
+
+// Route::get('/test-email', function () {
+//     try {
+//         Mail::raw('Ceci est un test d’email Laravel.', function ($message) {
+//             $message->to('kenzaaddi05@gmail.com') // ➜ mets ici ton adresse pour tester
+//                     ->subject('Test Email Laravel');
+//         });
+
+//         return 'Email envoyé avec succès !';
+//     } catch (\Exception $e) {
+//         Log::error('Erreur envoi email : ' . $e->getMessage());
+//         return 'Échec envoi email.';
+//     }
+// });
+// Route::get('/envoyer-mails', [SearchController::class, 'envoyerEmails']);
 
 Route::get('/reset-session', [SearchController::class, 'resetSession'])->name('reset.session');
+
+// Route::post('/cars/{car}/rate', [CarController::class, 'rateCar'])->name('cars.rate');
+Route::post('/api/cars/{car}/review-from-chat', [ReviewController::class, 'reviewFromPrompt']);
+Route::post('/cars/{car}/rate', [ReviewController::class, 'reviewFromPrompt'])->name('cars.rate');
+Route::resource('sites', SiteController::class)->only(['index', 'create', 'store', 'destroy']);
+// Route::get('/auto-review/{carId}', [ReviewController::class, 'checkAndProcessRating']);
 
 require __DIR__.'/auth.php';

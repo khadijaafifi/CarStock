@@ -123,6 +123,21 @@ public function show($id)
     $car = Car::findOrFail($id);
     return view('cars.show', compact('car'));
 }
+// public function rateCar(Request $request, Car $car)
+// {
+//     $request->validate(['rating' => 'required|integer|between:1,5']);
+    
+//     $car->reviews()->create([
+//         'rating' => $request->rating,
+//         'session_id' => session()->getId() // Stocke l'ID de session
+//     ]);
+//     // Calcul avec arrondi supérieur
+//     $average = $car->reviews()->avg('rating');
+//     $car->rating = ceil($average);
+//     $car->save();
+
+//     return back()->with('success', 'Merci pour votre note !');
+// }
 // public function search(Request $request)
 // {
 //     $query = $request->input('query');

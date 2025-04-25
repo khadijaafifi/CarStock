@@ -7,7 +7,7 @@
             <input class="form-control me-2" type="search" id="queryInput" 
                    placeholder="Rechercher ici." aria-label="Search">
             <button class="btn btn-outline-primary" type="submit">
-                <i class="bi bi-wechat"></i>
+                <i class="fas fa-robot"></i>
             </button>
         </form>
 
